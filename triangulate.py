@@ -1,18 +1,13 @@
 __author__ = 'fran'
 
-import pygame
-from pygame.locals import *
-from OpenGL.GL import *
-from OpenGL.GLU import *
 import sys
 import numpy as np
 import string as st
 import copy
 from Triangle import Triangle
-from Edge import Edge
 import utils
-import math
 import pyopencl as cl
+import time
 
 
 # Lee el archivo con las coordenadas y lo transforma a una lista de vertices
@@ -29,6 +24,9 @@ def prepCoords(file):
 
 
 def getMax(coordsList):
+    """ Returns max lexicographic point
+    :param coordsList: Numpy array of coordinates
+    """
     maxpoint = coordsList[0]
 
     for i in range(len(coordsList)):
@@ -39,6 +37,9 @@ def getMax(coordsList):
     return maxpoint
 
 def getMin(coordsList):
+    """ Returns min lexicographic point
+    :param coordsList: Numpy array of coordinates
+    """
     minpoint = coordsList[0]
 
     for i in range(len(coordsList)):
@@ -48,234 +49,101 @@ def getMin(coordsList):
 
     return minpoint
 
-def getNeighbors(t, triangles):
-    t1 = triangles[0]
-    t2 = triangles[1]
-    t3 = triangles[2]
-    n1 = [0, 0, 0]
-    n2 = [0, 0, 0]
-    n3 = [0, 0, 0]
 
-    if len(totaltriangles) == 1:
-        n1[0] = t2
-        n1[1] = t3
-        n1[2] = t.n3
+def triangulate_GPU(triangles, coords):
+    newtriangles = [triangles[0]]
+    gputime = 0
 
-        if t2.v1[0] < t2.v2[0]:
-            n2[0] = t.n1
-            n2[1] = t3
-            n2[2] = t1
-        else:
-            n2[0] = t1
-            n2[1] = t.n1
-            n2[2] = t3
+    platforms = cl.get_platforms()
+    if len(platforms) == 0:
+        print "Failed to find any OpenCL platforms."
+        return None
 
-        n3[0] = t2
-        n3[1] = t.n2
-        n3[2] = t1
+    devices = platforms[0].get_devices(cl.device_type.GPU)
+    if len(devices) == 0:
+        print "Could not find GPU device, trying CPU..."
+        devices = platforms[0].get_devices(cl.device_type.CPU)
+        if len(devices) == 0:
+            print "Could not find OpenCL GPU or CPU device."
+            return None
 
-        return n1, n3, n3
-    else:
-        edge1_1 = [t1.v2, t1.v3]
-        edge2_1 = [t1.v3, t1.v1]
-        edge3_1 = [t1.v1, t1.v2]
+    for p in coords:
+        # Paso la info de triangles a un formato que pueda usar en un kernel de OpenCL
+        tv1x, tv2x, tv3x = [], [], []
+        tv1y, tv2y, tv3y = [], [], []
 
-        edge1_2 = [t2.v2, t2.v3]
-        edge2_2 = [t2.v3, t2.v1]
-        edge3_2 = [t2.v1, t2.v2]
+        for t in newtriangles:
+            #print t
+            tv1x.append(np.int32(t.v1[0]))
+            tv1y.append(np.int32(t.v1[1]))
+            tv2x.append(np.int32(t.v2[0]))
+            tv2y.append(np.int32(t.v2[1]))
+            tv3x.append(np.int32(t.v3[0]))
+            tv3y.append(np.int32(t.v3[1]))
 
-        edge1_3 = [t3.v2, t3.v3]
-        edge2_3 = [t3.v3, t3.v1]
-        edge3_3 = [t3.v1, t3.v2]
+        tv1x = np.array(tv1x)
+        tv1y = np.array(tv1y)
+        tv2x = np.array(tv2x)
+        tv2y = np.array(tv2y)
+        tv3x = np.array(tv3x)
+        tv3y = np.array(tv3y)
 
-        for r in totaltriangles:
-            common = utils.findCommonEdge(t1, r)
-            '''print "common:"
-            print common'''
-            if len(common) >= 2:
-                if common[0] == edge1_1[0] and common[1] == edge1_1[1] and r.status == 0:
-                    n1[0] = r
-                elif common[0] == edge2_1[0] and common[1] == edge2_1[1] and r.status == 0:
-                    n1[1] = r
-                elif common[0] == edge3_1[0] and common[1] == edge3_1[1] and r.status == 0:
-                    n1[2] = r
+        px = p[0]*np.ones(len(tv1x))
+        py = p[1]*np.ones(len(tv1x))
 
-        for r in totaltriangles:
-            common = utils.findCommonEdge(t2, r)
-            if len(common) >= 2:
-                if common[0] == edge1_2[0] and common[1] == edge1_2[1] and r.status == 0:
-                    n2[0] = r
-                elif common[0] == edge2_2[0] and common[1] == edge2_2[1] and r.status == 0:
-                    n2[1] = r
-                elif common[0] == edge3_2[0] and common[1] == edge3_2[1] and r.status == 0:
-                    n2[2] = r
+        ctx = cl.Context([devices[0]])
+        queue = cl.CommandQueue(ctx)
+        mf = cl.mem_flags
 
-        for r in totaltriangles:
-            common = utils.findCommonEdge(t3, r)
-            if len(common) >= 2:
-                if common[0] == edge1_3[0] and common[1] == edge1_3[1] and r.status == 0:
-                    n3[0] = r
-                elif common[0] == edge2_3[0] and common[1] == edge2_3[1] and r.status == 0:
-                    n3[1] = r
-                elif common[0] == edge3_3[0] and common[1] == edge3_3[1] and r.status == 0:
-                    n3[2] = r
+        tv1x_buf = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=tv1x)
+        tv1y_buf = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=tv1y)
+        tv2x_buf = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=tv2x)
+        tv2y_buf = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=tv2y)
+        tv3x_buf = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=tv3x)
+        tv3y_buf = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=tv3y)
+        px_buf = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=px)
+        py_buf = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=py)
 
-        for i in range(3):
-            if n1[i] == 0:
-                n1[i] = None
+        dest_buf = cl.Buffer(ctx, mf.WRITE_ONLY, tv1x.nbytes)
 
-        for i in range(3):
-            if n2[i] == 0:
-                n2[i] = None
+        f = open('isinside.cl', 'r')
+        programName = "".join(f.readlines())
 
-        for i in range(3):
-            if n3[i] == 0:
-                n3[i] = None
+        program = cl.Program(ctx, programName).build()
 
-        return n1, n2, n3
+        starttime = time.clock()
+        program.isinside(queue, tv1x.shape, None, tv1x_buf, tv1y_buf, tv2x_buf, tv2y_buf,
+                         tv3x_buf, tv3y_buf, px_buf, py_buf, dest_buf)
+        endtime = time.clock()
+        totaltime = endtime - starttime
+        gputime = gputime + totaltime
 
+        res_triangles = np.empty_like(tv1x)
+        cl.enqueue_copy(queue, res_triangles, dest_buf)
 
-def edgeFlip(t1,t2):
-    common = utils.findCommonEdge(t1, t2)
-    '''print "common: " + str(common)'''
+        # triangle_index = indice del triangulo en triangles donde se encuentra el punto
+        # currTriangle = triangulo que contiene al punto p
+        triangle_index = np.nonzero(res_triangles)[0][0]
+        currTriangle = newtriangles[triangle_index]
 
-    vertex1 = utils.findOutsider(t1, common)
-    vertex2 = utils.findOutsider(t2, common)
-    '''print "vertices:"
-    print vertex1
-    print vertex2'''
+        # Ahora tengo que eliminar currTriangle y crear los 3 nuevos triangulos, esos los agrego a newtriangles
+        ccwCoords = utils.orderVertices([p, currTriangle.v1, currTriangle.v2])
+        tn1 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
+        ccwCoords = utils.orderVertices([p, currTriangle.v2, currTriangle.v3])
+        tn2 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
+        ccwCoords = utils.orderVertices([p, currTriangle.v3, currTriangle.v1])
+        tn3 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
 
-    if vertex1 == vertex2 or vertex1 is None or vertex2 is None or len(common) < 2:
-        print "mal"
-        return False
+        newtriangles.append(tn1)
+        newtriangles.append(tn2)
+        newtriangles.append(tn3)
 
-    ccwCoords = utils.orderVertices([vertex1, vertex2, common[0]])
-    temp1 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-    ccwCoords = utils.orderVertices([vertex1, vertex2, common[1]])
-    temp2 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
+        newtriangles.remove(currTriangle)
 
-    t1vertex = [temp1.v1, temp1.v2, temp1.v3]
-    t2vertex = [temp2.v1, temp2.v2, temp2.v3]
-    t1nbs = [None, None, None]
-    t2nbs = [None, None, None]
-
-    opTemp1 = utils.findOutsider(temp2, [vertex1, vertex2])
-    opTemp2 = utils.findOutsider(temp1, [vertex1, vertex2])
-    tmpIndex = t1vertex.index(opTemp2)
-    t1nbs[tmpIndex] = temp2
-    tmpIndex = t2vertex.index(opTemp1)
-    t2nbs[tmpIndex] = temp1
-
-    '''print opTemp1, opTemp2'''
-
-    totaltriangles.remove(t1)
-    totaltriangles.remove(t2)
-    totaltriangles.append(temp1)
-    totaltriangles.append(temp2)
-
-    for r in totaltriangles:
-        if r != t1 and r != t2:
-            common = utils.findCommonEdge(r, temp1)
-            if len(common) == 2:
-                solo = utils.findOutsider(temp1, common)
-                nbindex = t1vertex.index(solo)
-                t1nbs[nbindex] = r
-
-            common = utils.findCommonEdge(r, temp2)
-            if len(common) == 2:
-                solo = utils.findOutsider(temp2, common)
-                nbindex = t2vertex.index(solo)
-                t2nbs[nbindex] = r
-
-    temp1.setNeighbor(t1nbs[0], t1nbs[1], t1nbs[2])
-    temp2.setNeighbor(t2nbs[0], t2nbs[1], t2nbs[2])
-
-    for r in totaltriangles:
-        nbsr = [r.n1, r.n2, r.n3]
-        if r != t1 and r != t2:
-            if t1 in nbsr:
-                nbindex = nbsr.index(t1)
-                common = utils.findCommonEdge(r, t1)
-                if common[0] in t1vertex and common[1] in t1vertex:
-                    nbsr[nbindex] = temp1
-            if t2 in nbsr:
-                nbindex = nbsr.index(t2)
-                common = utils.findCommonEdge(r, t2)
-                if common[0] in t2vertex and common[1] in t2vertex:
-                    nbsr[nbindex] = temp2
-        r.setNeighbor(nbsr[0], nbsr[1], nbsr[2])
+    return newtriangles, gputime
 
 
-def fixEdge(t, p):
-    d1 = utils.pointLineDistance(p, t.v2, t.v3)  # Arista opuesta a v1, compartida con vecino1
-    d2 = utils.pointLineDistance(p, t.v3, t.v1)  # Arista opuesta a v2, compartida con vecino2
-    d3 = utils.pointLineDistance(p, t.v1, t.v2)  # Arista opuesta a v3, compartida con vecino3
-
-    lowerDistance = [d1, d2, d3]
-
-    #print lowerDistance
-
-    minDist = min(lowerDistance)
-
-    for i in range(len(lowerDistance)):
-        if lowerDistance[i] == minDist:
-            neighborIndex = i
-
-    nbs = [t.n1, t.n2, t.n3]
-    #print nbs
-
-    nbt = nbs[neighborIndex]  # Triangulo vecino mas cercano al punto
-
-    #print nbt
-
-    if nbt != None:
-        common = utils.findCommonEdge(t, nbt)
-        vertex1 = utils.findOutsider(t, common)
-        vertex2 = utils.findOutsider(nbt, common)
-        ccwCoords = utils.orderVertices([vertex1, common[0], p])
-        t1 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-        ccwCoords = utils.orderVertices([vertex1, common[1], p])
-        t2 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-        ccwCoords = utils.orderVertices([vertex2, common[0], p])
-        t3 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-        ccwCoords = utils.orderVertices([vertex2, common[1], p])
-        t4 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-
-        return nbt, t1, t2, t3, t4
-
-
-def circleTest(t, p):
-    print "GPUing bitchezzz"
-    mf = cl.mem_flags
-
-    print t
-
-    p1 = t.v1
-    p2 = t.v2
-    p3 = t.v3
-
-    #initialize client side (CPU) arrays
-    self.a = np.array(p1, dtype=np.int32)
-    self.b = np.array(p2, dtype=np.int32)
-    self.c =np.array(p3, dtype=np.int32)
-
-    #create OpenCL buffers
-    self.a_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=self.a)
-    self.b_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=self.b)
-    self.c_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=self.c)
-    self.dest_buf = cl.Buffer(self.ctx, mf.WRITE_ONLY, self.b.nbytes)
-
-    self.program.area2(self.queue, self.a.shape, None, self.a_buf, self.b_buf, self.c_buf, self.dest_buf)
-    d = np.empty_like(self.a[0])
-    cl.enqueue_read_buffer(self.queue, self.dest_buf, d).wait()
-    print "a", self.a
-    print "b", self.b
-    print "c", d
-
-    return d
-
-def startTriangles(triangles, coords): # triangles tiene inicialmente el triang grande, coords solo los ptos interiores
-
+def triangulate_CPU(triangles, coords):
     trs = []
     trs.append(triangles[0])
 
@@ -283,10 +151,7 @@ def startTriangles(triangles, coords): # triangles tiene inicialmente el triang 
         p = coords[i]
 
         for t in trs:
-            print "ok"
-            print p
             if utils.isInside(p, t):
-                print "inside triangle"
                 ccwCoords = utils.orderVertices([p, t.v1, t.v2])
                 tn1 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
                 ccwCoords = utils.orderVertices([p, t.v2, t.v3])
@@ -298,63 +163,8 @@ def startTriangles(triangles, coords): # triangles tiene inicialmente el triang 
                 trs.append(tn2)
                 trs.append(tn3)
 
-                #Esta es la parte de edge flip para Delaunay, ahora no la necesito
-                """for nt in t.neighbors:
-                    if nt is not None:
-                        commonEdge = utils.findCommonEdge(nt, tn1)
-                        if commonEdge != []:
-                            outsider = utils.findOutsider(nt, commonEdge)
-                            if circleTest(tn1, outsider) < 0:
-                                ccwCoords = utils.orderVertices([p, commonEdge[0], outsider])
-                                tnn1 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-                                ccwCoords = utils.orderVertices([p, commonEdge[1], outsider])
-                                tnn2 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-                                tnn1.setNeighbor([tnn2, tn2, nt.neighbors[2]])
-                                tnn2.setNeighbor([tn1, tnn1, nt.neighbors[0]])
-
-                                trs.append(tnn1)
-                                trs.append(tnn2)
-                                trs.remove(nt)
-                                trs.remove(tn1)
-                for nt in t.neighbors:
-                    if nt is not None:
-                        commonEdge = utils.findCommonEdge(nt, tn2)
-                        if commonEdge != []:
-                            outsider = utils.findOutsider(nt, commonEdge)
-                            if circleTest(tn2, outsider) < 0:
-                                ccwCoords = utils.orderVertices([p, commonEdge[0], outsider])
-                                tnn1 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-                                ccwCoords = utils.orderVertices([p, commonEdge[1], outsider])
-                                tnn2 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-                                tnn1.setNeighbor([tnn2, tn2, nt.neighbors[2]])
-                                tnn2.setNeighbor([tn1, tnn1, nt.neighbors[0]])
-
-                                trs.append(tnn1)
-                                trs.append(tnn2)
-                                trs.remove(nt)
-                                trs.remove(tn2)
-
-                for nt in t.neighbors:
-                    if nt is not None:
-                        commonEdge = utils.findCommonEdge(nt, tn3)
-                        if commonEdge != []:
-                            outsider = utils.findOutsider(nt, commonEdge)
-                            if circleTest(tn3, outsider) < 0:
-                                ccwCoords = utils.orderVertices([p, commonEdge[0], outsider])
-                                tnn1 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-                                ccwCoords = utils.orderVertices([p, commonEdge[1], outsider])
-                                tnn2 = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
-                                tnn1.setNeighbor([tnn2, tn2, nt.neighbors[2]])
-                                tnn2.setNeighbor([tn1, tnn1, nt.neighbors[0]])
-
-                                trs.append(tnn1)
-                                trs.append(tnn2)
-                                trs.remove(nt)
-                                trs.remove(tn3)"""
                 trs.remove(t)
                 break
-
-    print "fin"
     return trs
 
 
@@ -368,6 +178,7 @@ def main():
 
     coordsToAdd = copy.deepcopy(coordsList)
 
+    # Defino bounding triangle inicial
     k1 = (maxpointLex[0]-minpointLex[0])
     k2 = (maxpointLex[1]-minpointLex[1])
     k = 100*max(k1, k2)
@@ -375,8 +186,6 @@ def main():
     p1 = [0, -round(k/2)]
     p2 = [0, round(k/2)]
     p3 = [round(k/2), round(k/2)]
-
-    print p1, p2, p3
 
     coordsList.append(p1)
     coordsList.append(p2)
@@ -389,14 +198,22 @@ def main():
         i += 1
 
     ccwCoords = utils.orderVertices([p1, p2, p3])
-    print ccwCoords[0], ccwCoords[1], ccwCoords[2]
     firstTriangle = Triangle(ccwCoords[0], ccwCoords[1], ccwCoords[2])
 
     allTriangles = []
     allTriangles.append(firstTriangle)
 
-    triang = startTriangles(allTriangles, coordsToAdd)
-    triang = utils.removeBigTriangle(triang, p1, p2, p3)
+    # Triangulacion CPU
+    start = time.clock()
+    triangCPU = triangulate_CPU(allTriangles, coordsToAdd)
+    end = time.clock()
+    print("CPU: %f s" % (end - start))
+
+    # Triangulacion GPU
+    triang, gputime = triangulate_GPU(allTriangles, coordsToAdd)
+    print("GPU: %f s" % (gputime))
+
+    triangCPU = utils.removeBigTriangle(triangCPU, p1, p2, p3)
 
     for t in triang:
         output.write("# " + str(coordsList.index(t.v1)) + " " + str(coordsList.index(t.v2)) + " " + str(coordsList.index(t.v3)) + "\n")
