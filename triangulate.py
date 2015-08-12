@@ -215,7 +215,7 @@ def main():
 
     triangCPU = utils.removeBigTriangle(triangCPU, p1, p2, p3)
 
-    for t in triang:
+    for t in triangCPU:
         output.write("# " + str(coordsList.index(t.v1)) + " " + str(coordsList.index(t.v2)) + " " + str(coordsList.index(t.v3)) + "\n")
 
     output.close()
