@@ -33,7 +33,7 @@
 
 - To run the triangulations:
 
-        python triangulate.py [OPTION] input_coordinates_file
+        python triangulate.py input_coordinates_file [OPTION]
 	
 	OPTIONS: 
 	
