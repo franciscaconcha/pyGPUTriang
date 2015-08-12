@@ -32,6 +32,7 @@
         python pointsGen.py n_of_points low_limit high_limit
 
 - To run the triangulations:
+
         python triangulate.py [OPTION] input_coordinates_file
 	
 	OPTIONS: 
@@ -41,4 +42,5 @@
 		none: will run BOTH!
 
 - To plot:
+
 	    python plot.py
