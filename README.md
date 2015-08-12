@@ -1,12 +1,12 @@
-**********************************************************************
+**************************************************************
 	    	NON-DELAUNAY Triangulation Algorithm
 		     with (some) GPU support :)
-**********************************************************************
+**************************************************************
          By Francisca Concha Ramírez -- faconcha@dcc.uchile.cl
           Assignment for course CC5502 Computational Geometry
 		              August 2015
 	 Computer Science Department - Universidad de Chile
-**********************************************************************
+***************************************************************
 
 ----------------------------------ABOUT-----------------------------------
 - This program uses an incremental algorithm, as would be done for a Delaunay
