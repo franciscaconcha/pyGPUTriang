@@ -33,13 +33,7 @@
 
 - To run the triangulations:
 
-        python triangulate.py input_coordinates_file [OPTION]
-	
-	OPTIONS: 
-	
-		-C: run on CPU 
-		-G: run on GPU
-		none: will run BOTH!
+        python triangulate.py input_coordinates_file
 
 - To plot:
 
