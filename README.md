@@ -15,7 +15,7 @@
 - Also includes a random coordinates generator and a small plotting script
 
 ### WARNINGS! When running on GPU...
-- The GPU part has A LOT of precision problems that I'm tryin to fix. 
+- The GPU part has A LOT of precision problems that I'm trying to fix. 
   If you want to use it, do so at your own risk (for now!)
 - Some drivers may present some problems of not detecting your GPU device.
   If this happens, try running the program as root.
@@ -27,14 +27,16 @@
 - All the necessary drivers and support for your specific GPU
 
 ## Running:
-- To run the points generator:
+-To generate random points for the triangulation:
 
         python pointsGen.py n_of_points low_limit high_limit
 
-- To run the triangulations:
+`low_limit` and `high_limit` are the coordinate limits. The random points will be created inside a square of side length `high_limit-low_limit`. The script will output a file with the coordinates of the points.
+
+- To create triangulation from the random points:
 
         python triangulate.py input_coordinates_file
 
-- To plot:
+- To plot the triangulation:
 
 	    python plot.py
